@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Creative AI — AI Voice Assistant</title>
+<style>
+:root{
+  --bg:#07090f;--panel:rgba(18,22,34,.72);--line:rgba(255,255,255,.10);
+  --text:#f5f7fb;--muted:#8f99ad;--accent:#7c5cff;--accent2:#22d3ee;
+  --danger:#ff5577;--shadow:0 25px 80px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;min-height:100vh;color:var(--text);
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:
+    radial-gradient(circle at 50% 25%,rgba(124,92,255,.16),transparent 28%),
+    radial-gradient(circle at 85% 80%,rgba(34,211,238,.08),transparent 25%),var(--bg);
+  overflow-x:hidden;
+}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:48px 48px;mask-image:linear-gradient(to bottom,black,transparent 80%)}
+.app{width:min(1180px,94vw);margin:auto;padding:28px 0 34px;min-height:100vh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:4px 4px 22px}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{width:40px;height:40px;border-radius:13px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;font-weight:900;box-shadow:0 8px 30px rgba(124,92,255,.3)}
+.brand strong{font-size:17px;letter-spacing:-.3px}.brand span{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+.status{display:flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--line);background:rgba(255,255,255,.035);border-radius:999px;color:#b9c2d2;font-size:12px}
+.dot{width:7px;height:7px;border-radius:50%;background:#36e0a0;box-shadow:0 0 12px #36e0a0}
+.dot.off{background:#ff5577;box-shadow:0 0 12px #ff5577}
+.layout{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;flex:1}
+.card{border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:28px;box-shadow:var(--shadow);overflow:hidden}
+.hero{min-height:680px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;padding:40px}
+.badge{position:absolute;top:24px;left:26px;padding:7px 11px;border:1px solid var(--line);border-radius:999px;color:#aeb8cb;font-size:11px;background:rgba(255,255,255,.035)}
+.badge b{color:#fff}
+.voice-select{position:absolute;top:20px;right:24px;padding:7px 11px;border:1px solid var(--line);border-radius:999px;color:#dbe0ea;font:inherit;font-size:11px;background:rgba(18,22,34,.9);outline:none;cursor:pointer}
+.orb-wrap{position:relative;width:260px;height:260px;display:grid;place-items:center;margin-top:10px}
+.orb-wrap:before,.orb-wrap:after{content:"";position:absolute;border:1px solid rgba(124,92,255,.18);border-radius:50%;inset:10px;animation:spin 13s linear infinite}
+.orb-wrap:after{inset:30px;border-color:rgba(34,211,238,.13);animation-direction:reverse;animation-duration:9s}
+/* ---------- Avatar ---------- */
+.orb{width:220px;height:220px;border-radius:50%;position:relative;transition:box-shadow .35s;box-shadow:0 0 50px rgba(124,92,255,.45),0 0 120px rgba(34,211,238,.10);background:radial-gradient(circle at 50% 40%,#3a3170 0%,#15122b 75%);overflow:hidden}
+.orb:before{content:"";position:absolute;inset:-18px;border-radius:50%;background:conic-gradient(from 0deg,transparent,#8e7aff,transparent,#35d9ef,transparent);filter:blur(14px);opacity:.35;animation:spin 6s linear infinite;z-index:0}
+.orb svg{position:relative;z-index:1;width:100%;height:100%;display:block}
+.avatar-head{transform-origin:200px 290px;animation:sway 6s ease-in-out infinite}
+.eyelid{transform-box:fill-box;transform-origin:center top;transform:scaleY(0);animation:blink 4.5s infinite}
+.orb.listening{box-shadow:0 0 70px rgba(34,211,238,.55),0 0 130px rgba(34,211,238,.18)}
+.orb.listening .avatar-head{animation:sway 6s ease-in-out infinite,tilt 3s ease-in-out infinite}
+.orb.thinking .avatar-head{animation:look 2.4s ease-in-out infinite}
+.orb.speaking{box-shadow:0 0 80px rgba(124,92,255,.85),0 0 140px rgba(34,211,238,.2)}
+.orb.speaking .avatar-head{animation:nod .9s ease-in-out infinite}
+@keyframes sway{0%,100%{transform:rotate(-1.2deg)}50%{transform:rotate(1.2deg)}}
+@keyframes tilt{0%,100%{transform:rotate(0)}50%{transform:rotate(3deg)}}
+@keyframes nod{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(1.5px) rotate(1deg)}}
+@keyframes blink{0%,92%,100%{transform:scaleY(0)}95%{transform:scaleY(1)}}
+@keyframes look{0%,100%{transform:rotate(0)}30%{transform:rotate(-2.5deg) translateY(-1px)}70%{transform:rotate(2.5deg) translateY(-1px)}}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+.state{margin-top:24px;text-align:center}.state h1{font-size:30px;letter-spacing:-1.1px;margin:0 0 7px}.state p{margin:0;color:var(--muted);font-size:13px}
+.wave{height:45px;width:260px;margin:25px auto 20px;display:flex;align-items:center;justify-content:center;gap:4px}
+.bar{width:3px;height:8px;border-radius:4px;background:linear-gradient(#a08bff,#35d9ef);opacity:.45}
+.wave.active .bar{animation:wave .8s ease-in-out infinite}
+.bar:nth-child(2n){animation-delay:.1s}.bar:nth-child(3n){animation-delay:.22s}.bar:nth-child(4n){animation-delay:.34s}
+@keyframes wave{50%{height:34px;opacity:1}}
+.controls{display:flex;align-items:center;gap:12px}
+button{border:0;color:white;font:inherit;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+.mic{width:68px;height:68px;border-radius:22px;background:linear-gradient(135deg,var(--accent),#9a78ff);box-shadow:0 14px 35px rgba(124,92,255,.3);font-size:25px;transition:.2s}
+.mic:hover{transform:translateY(-2px);filter:brightness(1.08)}.mic.active{background:linear-gradient(135deg,#ff5276,#ff7b98)}
+.small-btn{width:44px;height:44px;border-radius:15px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:#cbd2df}
+.hint{margin-top:16px;color:#697387;font-size:11px}
+.side{display:flex;flex-direction:column;min-height:680px}
+.side-head{padding:22px 22px 17px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.side-head h2{font-size:14px;margin:0}.clear{font-size:11px;color:#7e899d;background:none}
+.messages{padding:20px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:14px;max-height:570px}
+.empty{margin:auto;color:#596477;font-size:12px;text-align:center}
+.msg{display:flex;gap:10px;align-items:flex-start}.msg.user{justify-content:flex-end}.avatar{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;font-size:12px;flex:none;background:rgba(124,92,255,.16);color:#b9adff}.user .avatar{order:2;background:rgba(34,211,238,.10);color:#77e8f7}
+.bubble{max-width:78%;padding:12px 14px;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:15px 15px 15px 5px;font-size:12px;line-height:1.55;color:#dbe0ea;white-space:pre-wrap;word-wrap:break-word}
+.user .bubble{border-radius:15px 15px 5px 15px;background:rgba(124,92,255,.12)}
+.msg.partial .bubble{opacity:.6;font-style:italic}
+.msg.error .bubble{border-color:rgba(255,85,119,.4);color:#ffb3c2}
+.time{display:block;color:#667085;font-size:9px;margin-top:5px;font-style:normal}
+.footer-note{padding:16px 20px;border-top:1px solid var(--line);color:#697387;font-size:10px;text-align:center}
+audio{display:none}
+@media(max-width:850px){.layout{grid-template-columns:1fr}.hero,.side{min-height:570px}.messages{max-height:420px}.app{padding-top:15px}.hero{padding:30px}.orb-wrap{transform:scale(.82);margin:-15px 0}.state h1{font-size:26px}.voice-select{top:60px;right:auto;left:26px}}
+</style>
+</head>
+<body>
+<audio id="myAudio"><source id="audioSource" src=""></audio>
+
+<div class="app">
+<header>
+  <div class="brand"><div class="logo">CI</div><div><strong>Creative AI</strong><span>Intelligent Voice Experience</span></div></div>
+  <div class="status"><i class="dot" id="statusDot"></i> <span id="statusText">AI System Online</span></div>
+</header>
+
+<main class="layout">
+<section class="card hero">
+  <div class="badge"><b>LIVE</b> · Voice Assistant</div>
+  <select id="translation-language" class="voice-select" title="Bot voice">
+    <option value="es">US Female 1</option>
+    <option value="fr">US Female 2</option>
+    <option value="de">US Male 1</option>
+    <option value="it">US Male 2</option>
+  </select>
+  <div class="orb-wrap"><div class="orb" id="orb">
+    <svg viewBox="70 30 260 260" aria-label="AI assistant avatar">
+      <defs>
+        <clipPath id="lowerLipClip"><path d="M176 221 Q203 219 231 221 Q226 238 203 239 Q180 238 176 221 Z"/></clipPath>
+        <linearGradient id="lidL" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8694a"/><stop offset="1" stop-color="#e59a74"/></linearGradient>
+        <linearGradient id="lidR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c47552"/><stop offset="1" stop-color="#eda57e"/></linearGradient>
+        <radialGradient id="mouthDark" cx="50%" cy="35%" r="65%"><stop offset="0" stop-color="#3a0d12"/><stop offset="1" stop-color="#6e1f22"/></radialGradient>
+      </defs>
+      <g class="avatar-head">
+        <image href="avatar.png" x="0" y="0" width="391" height="335"/>
+        <!-- eyelids (blink) -->
+        <g class="eyelid"><path d="M148 150 Q166 136 184 150 Q166 158 148 150 Z" fill="url(#lidL)"/><path d="M148 150 Q166 159 184 150" stroke="#3a1e14" stroke-width="2.2" fill="none" stroke-linecap="round"/></g>
+        <g class="eyelid"><path d="M222 150 Q240 136 258 150 Q240 158 222 150 Z" fill="url(#lidR)"/><path d="M222 150 Q240 159 258 150" stroke="#3a1e14" stroke-width="2.2" fill="none" stroke-linecap="round"/></g>
+        <!-- mouth opening + moving lower lip -->
+        <g id="mouthOpen">
+          <ellipse id="mouthHole" cx="203" cy="221" rx="21" ry="9" fill="url(#mouthDark)" transform="translate(0 221) scale(1 0)"/>
+          <rect id="teeth" x="191" y="221" width="24" height="3" rx="1.5" fill="#fff" opacity="0" />
+          <image id="lowerLip" href="avatar.png" x="0" y="0" width="391" height="335" clip-path="url(#lowerLipClip)"/>
+        </g>
+      </g>
+    </svg>
+  </div></div>
+  <div class="state"><h1 id="stateTitle">Ready to talk</h1><p id="stateText">Press the microphone and start speaking</p></div>
+  <div class="wave" id="wave"></div>
+  <div class="controls">
+    <button class="small-btn" id="mute" title="Mute / unmute">🔈</button>
+    <button class="mic" id="mic" title="Start / stop voice conversation">🎙️</button>
+    <button class="small-btn" id="stop" title="Stop">■</button>
+  </div>
+  <div class="hint">Click the mic to start · click again to stop</div>
+</section>
+
+<section class="card side">
+  <div class="side-head"><h2>Conversation</h2><button class="clear" id="clear">Clear chat</button></div>
+  <div class="messages" id="messages"><div class="empty" id="emptyNote">No messages yet</div></div>
+  <div class="footer-note">Creative AI · AssemblyAI + OpenAI + Google TTS</div>
+</section>
+</main>
+</div>
+
+<script src="assemblyai.umd.min.js"></script>
+<script src="RecordRTC.js"></script>
+<script>
+// ---------- DOM ----------
+const orb = document.getElementById("orb");
+const wave = document.getElementById("wave");
+const mic = document.getElementById("mic");
+const stopBtn = document.getElementById("stop");
+const muteBtn = document.getElementById("mute");
+const clearBtn = document.getElementById("clear");
+const title = document.getElementById("stateTitle");
+const sub = document.getElementById("stateText");
+const messages = document.getElementById("messages");
+const voiceSelect = document.getElementById("translation-language");
+const statusDot = document.getElementById("statusDot");
+const statusText = document.getElementById("statusText");
+const audio = document.getElementById("myAudio");
+const source = document.getElementById("audioSource");
+
+for (let i = 0; i < 34; i++) { const b = document.createElement("span"); b.className = "bar"; wave.appendChild(b); }
+
+// ---------- State ----------
+let isRecording = false;
+let busy = false;        // true while starting / stopping
+let muted = false;
+let recorder = null;
+let rt = null;
+let micStream = null;
+let partialRow = null;   // live "typing" bubble for the user
+
+// ---------- UI helpers ----------
+// ---------- Lip sync (driven by real audio volume) ----------
+const mouthHole = document.getElementById("mouthHole");
+const lowerLip = document.getElementById("lowerLip");
+const teeth = document.getElementById("teeth");
+
+// open: 0 (closed) .. 1 (wide open)
+function setMouth(open) {
+  const o = Math.max(0, Math.min(1, open)) * 0.7;
+  mouthHole.setAttribute("transform", `translate(0 ${(221 - 221 * o).toFixed(2)}) scale(1 ${o.toFixed(3)})`);
+  lowerLip.setAttribute("transform", `translate(0 ${(o * 8).toFixed(2)})`);
+  teeth.setAttribute("opacity", o > 0.18 ? "0.85" : "0");
+}
+let audioCtx = null, analyser = null, levels = null, lipRaf = null, smooth = 0;
+
+function initLipSync() {
+  if (audioCtx) { if (audioCtx.state === "suspended") audioCtx.resume(); return; }
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const srcNode = audioCtx.createMediaElementSource(audio);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    levels = new Uint8Array(analyser.fftSize);
+    srcNode.connect(analyser);
+    analyser.connect(audioCtx.destination);
+  } catch (e) {
+    console.warn("Lip sync analyser unavailable, using CSS animation:", e);
+    analyser = null;
+  }
+}
+
+function lipLoop() {
+  if (!analyser) return;
+  analyser.getByteTimeDomainData(levels);
+  let sum = 0;
+  for (let i = 0; i < levels.length; i++) { const v = (levels[i] - 128) / 128; sum += v * v; }
+  const rms = Math.sqrt(sum / levels.length);           // 0 .. ~0.5
+  const target = Math.min(1, rms * 5.5);
+  smooth += (target - smooth) * 0.45;                   // smooth jitter
+  setMouth(smooth);
+  lipRaf = requestAnimationFrame(lipLoop);
+}
+
+// fallback: fake talking rhythm if Web Audio is unavailable
+function fakeLipLoop() {
+  const t = performance.now() / 1000;
+  setMouth(0.35 + 0.35 * Math.sin(t * 17) * Math.abs(Math.sin(t * 3.1)));
+  lipRaf = requestAnimationFrame(fakeLipLoop);
+}
+
+function startLips() {
+  stopLips();
+  if (analyser) lipLoop(); else fakeLipLoop();
+}
+
+function stopLips() {
+  if (lipRaf) cancelAnimationFrame(lipRaf);
+  lipRaf = null; smooth = 0;
+  setMouth(0);
+}
+
+function setState(mode) {
+  orb.className = "orb " + mode + (analyser ? "" : " no-analyser");
+  if (mode === "speaking") startLips(); else stopLips();
+  wave.classList.toggle("active", mode !== "");
+  if (mode === "loading") { title.textContent = "Connecting…"; sub.textContent = "Starting secure voice session"; }
+  else if (mode === "listening") { title.textContent = "Listening…"; sub.textContent = "Speak naturally — I’m listening"; }
+  else if (mode === "thinking") { title.textContent = "Thinking…"; sub.textContent = "Generating a response"; }
+  else if (mode === "speaking") { title.textContent = "AI is speaking"; sub.textContent = "Click the mic to stop the session"; }
+  else { title.textContent = "Ready to talk"; sub.textContent = "Press the microphone and start speaking"; }
+
+  mic.classList.toggle("active", isRecording);
+  mic.textContent = mode === "loading" ? "⏳" : (isRecording ? "⏹" : "🎙️");
+}
+
+// After bot speaks / thinks, go back to listening if session still on
+function idleState() { setState(isRecording ? "listening" : ""); }
+
+function setOnline(ok, text) {
+  statusDot.classList.toggle("off", !ok);
+  statusText.textContent = text;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+}
+
+function nowTime() {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function makeRow(text, user, extraClass = "") {
+  const empty = document.getElementById("emptyNote");
+  if (empty) empty.remove();
+  const row = document.createElement("div");
+  row.className = "msg " + (user ? "user " : "") + extraClass;
+  row.innerHTML = `<div class="avatar">${user ? "●" : "✦"}</div><div class="bubble"><span class="txt">${escapeHtml(text)}</span><span class="time">${user ? "You" : "AI Assistant"} · ${nowTime()}</span></div>`;
+  messages.appendChild(row);
+  messages.scrollTop = messages.scrollHeight;
+  return row;
+}
+
+function addMsg(text, user = false) { return makeRow(text, user); }
+function addError(text) { return makeRow(text, false, "error"); }
+
+// Live user transcript (right side), updated while speaking
+function updatePartial(text) {
+  if (!text) return;
+  if (!partialRow) partialRow = makeRow(text, true, "partial");
+  else partialRow.querySelector(".txt").textContent = text;
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function finalizePartial(text) {
+  if (partialRow) {
+    partialRow.classList.remove("partial");
+    partialRow.querySelector(".txt").textContent = text;
+    partialRow = null;
+  } else {
+    addMsg(text, true);
+  }
+}
+
+// ---------- Bot reply ----------
+async function handleFinalText(text) {
+  if (!text || !text.trim()) return;
+  setState("thinking");
+  try {
+    const response = await fetch("/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, target_lang: voiceSelect.value }),
+    });
+    if (!response.ok) throw new Error(`/translate failed: ${response.status}`);
+    const data = await response.json();
+    const botText = data.textF || "";
+
+    let printed = false;
+    const printBot = () => { if (!printed) { printed = true; addMsg(botText, false); } };
+
+    if (data?.data?.audioContent && !muted) {
+      source.src = `data:audio/mp3;base64,${data.data.audioContent}`;
+      audio.load();
+      audio.onplay = () => { printBot(); setState("speaking"); };
+      audio.onended = () => idleState();
+      audio.play().catch(e => { console.warn("Audio play blocked:", e); printBot(); idleState(); });
+    } else {
+      if (!data?.data?.audioContent) console.warn("No audio from Google TTS — check server logs / GOOGLE_API_KEY.");
+      printBot();
+      idleState();
+    }
+  } catch (e) {
+    console.error("Translate/TTS error:", e);
+    addError("Sorry, I couldn't generate a reply. Check the server console.");
+    idleState();
+  }
+}
+
+// ---------- Session control ----------
+async function stopAll() {
+  try {
+    if (recorder) { recorder.stopRecording(); recorder = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (rt) { const r = rt; rt = null; await r.close(); }
+  } catch (e) {
+    console.error("Stop error:", e);
+  }
+  audio.pause();
+  partialRow = null;
+}
+
+async function stopSession() {
+  if (busy) return;
+  busy = true;
+  isRecording = false;
+  await stopAll();
+  busy = false;
+  setOnline(true, "AI System Online");
+  setState("");
+}
+
+async function startSession() {
+  if (busy) return;
+  busy = true;
+  mic.disabled = true;
+  setState("loading");
+
+  try {
+    // 1. v3 temporary token from server
+    const response = await fetch("/token");
+    if (!response.ok) throw new Error(`/token failed: ${response.status}`);
+    const data = await response.json();
+
+    // 2. v3 streaming transcriber
+    rt = new assemblyai.StreamingTranscriber({ token: data.token, sampleRate: 16000 });
+
+    rt.on("open", ({ id }) => console.log("AssemblyAI session opened:", id));
+
+    rt.on("turn", async (turn) => {
+      if (!turn.end_of_turn) { updatePartial(turn.transcript); return; }
+      if (!turn.transcript || !turn.transcript.trim()) return;
+      finalizePartial(turn.transcript);
+      await handleFinalText(turn.transcript);
+    });
+
+    rt.on("error", (error) => {
+      console.error("AssemblyAI error:", error);
+      setOnline(false, "Connection error");
+    });
+
+    rt.on("close", (code, reason) => {
+      console.log("AssemblyAI closed:", code, reason);
+      if (isRecording && !busy) {
+        addError("Voice session closed" + (reason ? `: ${reason}` : "."));
+        stopSession();
+      }
+    });
+
+    // 3. connect socket
+    await rt.connect();
+
+    // 4. microphone
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    recorder = new RecordRTC(micStream, {
+      type: "audio",
+      mimeType: "audio/webm;codecs=pcm",
+      recorderType: StereoAudioRecorder,
+      timeSlice: 250,
+      desiredSampRate: 16000,
+      numberOfAudioChannels: 1,
+      bufferSize: 4096,
+      audioBitsPerSecond: 128000,
+      ondataavailable: async (blob) => {
+        if (!rt) return;
+        const buffer = await blob.arrayBuffer();
+        rt.sendAudio(buffer.slice(44)); // strip WAV header -> raw PCM16
+      },
+    });
+
+    recorder.startRecording();
+    isRecording = true;
+    setOnline(true, "Live session");
+    setState("listening");
+  } catch (err) {
+    console.error("Start failed:", err);
+    isRecording = false;
+    await stopAll();
+    setOnline(false, "Start failed");
+    addError("Could not start voice session. Check microphone permission and server console.");
+    setState("");
+  } finally {
+    busy = false;
+    mic.disabled = false;
+  }
+}
+
+// ---------- Buttons ----------
+mic.onclick = () => { initLipSync(); return isRecording ? stopSession() : startSession(); };
+stopBtn.onclick = () => { if (isRecording) stopSession(); else { audio.pause(); setState(""); } };
+
+muteBtn.onclick = () => {
+  muted = !muted;
+  muteBtn.textContent = muted ? "🔇" : "🔈";
+  audio.muted = muted;
+};
+
+clearBtn.onclick = () => {
+  partialRow = null;
+  messages.innerHTML = '<div class="empty" id="emptyNote">No messages yet</div>';
+};
+
+setState("");
+</script>
+</body>
+</html>
