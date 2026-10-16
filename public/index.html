@@ -124,14 +124,14 @@ audio{display:none}
       </g>
     </svg>
   </div></div>
-  <div class="state"><h1 id="stateTitle">Ready to talk</h1><p id="stateText">Press the microphone and start speaking</p></div>
+  <div class="state"><h1 id="stateTitle">Ready to talk</h1><p id="stateText">Hold the microphone and speak</p></div>
   <div class="wave" id="wave"></div>
   <div class="controls">
     <button class="small-btn" id="mute" title="Mute / unmute">🔈</button>
     <button class="mic" id="mic" title="Start / stop voice conversation">🎙️</button>
     <button class="small-btn" id="stop" title="Stop">■</button>
   </div>
-  <div class="hint">Click the mic to start · click again to stop</div>
+  <div class="hint">Press &amp; hold the mic (or Space) to talk · release to get the answer</div>
 </section>
 
 <section class="card side">
@@ -171,6 +171,27 @@ let recorder = null;
 let rt = null;
 let micStream = null;
 let partialRow = null;   // live "typing" bubble for the user
+let rtOpen = false;      // socket connected (audio is buffered until then)
+let holding = false;     // mic button is held down
+let finishedText = [];   // finished AssemblyAI turns during this hold
+
+// ---------- Audio chunker ----------
+// AssemblyAI v3 accepts 50-1000 ms per message. Browser blobs can be bigger,
+// so collect PCM16 bytes and send fixed 100 ms chunks (16000 Hz * 2 bytes * 0.1 s).
+const CHUNK_BYTES = 3200;
+let pcmQueue = new Uint8Array(0);
+
+function queueAndSend(bytes) {
+  const merged = new Uint8Array(pcmQueue.length + bytes.length);
+  merged.set(pcmQueue, 0);
+  merged.set(bytes, pcmQueue.length);
+  let offset = 0;
+  while (merged.length - offset >= CHUNK_BYTES && rt && rtOpen) {
+    rt.sendAudio(merged.slice(offset, offset + CHUNK_BYTES).buffer);
+    offset += CHUNK_BYTES;
+  }
+  pcmQueue = merged.slice(offset);
+}
 
 // ---------- UI helpers ----------
 // ---------- Lip sync (driven by real audio volume) ----------
@@ -238,10 +259,10 @@ function setState(mode) {
   if (mode === "speaking") startLips(); else stopLips();
   wave.classList.toggle("active", mode !== "");
   if (mode === "loading") { title.textContent = "Connecting…"; sub.textContent = "Starting secure voice session"; }
-  else if (mode === "listening") { title.textContent = "Listening…"; sub.textContent = "Speak naturally — I’m listening"; }
+  else if (mode === "listening") { title.textContent = "Listening…"; sub.textContent = "Release the button when you finish"; }
   else if (mode === "thinking") { title.textContent = "Thinking…"; sub.textContent = "Generating a response"; }
-  else if (mode === "speaking") { title.textContent = "AI is speaking"; sub.textContent = "Click the mic to stop the session"; }
-  else { title.textContent = "Ready to talk"; sub.textContent = "Press the microphone and start speaking"; }
+  else if (mode === "speaking") { title.textContent = "AI is speaking"; sub.textContent = "Hold the mic to interrupt and talk"; }
+  else { title.textContent = "Ready to talk"; sub.textContent = "Hold the microphone and speak"; }
 
   mic.classList.toggle("active", isRecording);
   mic.textContent = mode === "loading" ? "⏳" : (isRecording ? "⏹" : "🎙️");
@@ -330,108 +351,167 @@ async function handleFinalText(text) {
   }
 }
 
-// ---------- Session control ----------
-async function stopAll() {
-  try {
-    if (recorder) { recorder.stopRecording(); recorder = null; }
-    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-    if (rt) { const r = rt; rt = null; await r.close(); }
-  } catch (e) {
-    console.error("Stop error:", e);
-  }
-  audio.pause();
+// ---------- Session control (push-to-talk) ----------
+// Press  -> open AssemblyAI socket + start mic (audio is buffered while connecting)
+// Release-> flush audio, send Terminate, wait for final words, then ask the bot
+
+async function getMic() {
+  if (micStream && micStream.active) return micStream;
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  return micStream;
+}
+
+function startRecorder(stream) {
+  recorder = new RecordRTC(stream, {
+    type: "audio",
+    mimeType: "audio/webm;codecs=pcm",
+    recorderType: StereoAudioRecorder,
+    timeSlice: 250,
+    desiredSampRate: 16000,
+    numberOfAudioChannels: 1,
+    bufferSize: 4096,
+    audioBitsPerSecond: 128000,
+    ondataavailable: async (blob) => {
+      if (!rt) return;
+      const buffer = await blob.arrayBuffer();
+      queueAndSend(new Uint8Array(buffer, 44)); // strip WAV header -> raw PCM16, 100 ms chunks
+    },
+  });
+  recorder.startRecording();
+}
+
+// Stop recorder and wait for its last blob
+function stopRecorder() {
+  return new Promise((resolve) => {
+    if (!recorder) return resolve();
+    const r = recorder; recorder = null;
+    try {
+      r.stopRecording(async () => {
+        try {
+          const blob = r.getBlob();
+          if (blob && rt) queueAndSend(new Uint8Array(await blob.arrayBuffer(), 44));
+        } catch (_) {}
+        resolve();
+      });
+    } catch (_) { resolve(); }
+  });
+}
+
+function currentUserText() {
+  return finishedText.join(" ").trim();
+}
+
+async function pressStart() {
+  if (busy || holding) return;
+  holding = true;
+  busy = true;
+  initLipSync();
+  audio.pause();                // interrupt bot if it is speaking
+  finishedText = [];
   partialRow = null;
-}
-
-async function stopSession() {
-  if (busy) return;
-  busy = true;
-  isRecording = false;
-  await stopAll();
-  busy = false;
-  setOnline(true, "AI System Online");
-  setState("");
-}
-
-async function startSession() {
-  if (busy) return;
-  busy = true;
-  mic.disabled = true;
-  setState("loading");
+  pcmQueue = new Uint8Array(0);
+  rtOpen = false;
+  isRecording = true;
+  setState("listening");
 
   try {
-    // 1. v3 temporary token from server
-    const response = await fetch("/token");
-    if (!response.ok) throw new Error(`/token failed: ${response.status}`);
-    const data = await response.json();
+    // mic + token in parallel so first words are not lost
+    const [stream, tokenRes] = await Promise.all([getMic(), fetch("/token")]);
+    if (!tokenRes.ok) throw new Error(`/token failed: ${tokenRes.status}`);
+    const { token } = await tokenRes.json();
 
-    // 2. v3 streaming transcriber
-    rt = new assemblyai.StreamingTranscriber({ token: data.token, sampleRate: 16000 });
+    rt = new assemblyai.StreamingTranscriber({ token, sampleRate: 16000 });
 
-    rt.on("open", ({ id }) => console.log("AssemblyAI session opened:", id));
-
-    rt.on("turn", async (turn) => {
-      if (!turn.end_of_turn) { updatePartial(turn.transcript); return; }
-      if (!turn.transcript || !turn.transcript.trim()) return;
-      finalizePartial(turn.transcript);
-      await handleFinalText(turn.transcript);
+    rt.on("turn", (turn) => {
+      const live = turn.end_of_turn ? "" : turn.transcript;
+      if (turn.end_of_turn && turn.transcript.trim()) finishedText.push(turn.transcript.trim());
+      const shown = [currentUserText(), live].join(" ").trim();
+      if (shown) updatePartial(shown);
     });
-
     rt.on("error", (error) => {
       console.error("AssemblyAI error:", error);
       setOnline(false, "Connection error");
     });
+    rt.on("close", (code, reason) => console.log("AssemblyAI closed:", code, reason));
 
-    rt.on("close", (code, reason) => {
-      console.log("AssemblyAI closed:", code, reason);
-      if (isRecording && !busy) {
-        addError("Voice session closed" + (reason ? `: ${reason}` : "."));
-        stopSession();
-      }
-    });
-
-    // 3. connect socket
+    startRecorder(stream);      // record while socket connects
     await rt.connect();
-
-    // 4. microphone
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    recorder = new RecordRTC(micStream, {
-      type: "audio",
-      mimeType: "audio/webm;codecs=pcm",
-      recorderType: StereoAudioRecorder,
-      timeSlice: 250,
-      desiredSampRate: 16000,
-      numberOfAudioChannels: 1,
-      bufferSize: 4096,
-      audioBitsPerSecond: 128000,
-      ondataavailable: async (blob) => {
-        if (!rt) return;
-        const buffer = await blob.arrayBuffer();
-        rt.sendAudio(buffer.slice(44)); // strip WAV header -> raw PCM16
-      },
-    });
-
-    recorder.startRecording();
-    isRecording = true;
-    setOnline(true, "Live session");
-    setState("listening");
+    rtOpen = true;
+    queueAndSend(new Uint8Array(0)); // flush audio buffered during connect
+    setOnline(true, "Listening");
   } catch (err) {
     console.error("Start failed:", err);
-    isRecording = false;
-    await stopAll();
+    await stopRecorder();
+    rt = null; rtOpen = false; isRecording = false; holding = false;
     setOnline(false, "Start failed");
-    addError("Could not start voice session. Check microphone permission and server console.");
+    addError("Could not start listening. Check microphone permission and server console.");
     setState("");
   } finally {
     busy = false;
-    mic.disabled = false;
+    if (!holding && rt) releaseStop(); // user released while we were connecting
   }
 }
 
+async function releaseStop() {
+  if (!holding && !rt) return;
+  holding = false;
+  if (busy) return;             // pressStart will call us when ready
+  busy = true;
+  isRecording = false;
+  setState("thinking");
+
+  await stopRecorder();
+  // send leftover partial chunk (>= 50 ms) and close; close(true) waits for final transcript
+  if (rt && rtOpen && pcmQueue.length >= 1600) rt.sendAudio(pcmQueue.slice().buffer);
+  pcmQueue = new Uint8Array(0);
+  if (rt) {
+    const r = rt;
+    try { await Promise.race([r.close(true), new Promise(res => setTimeout(res, 4000))]); }
+    catch (e) { console.error("Close error:", e); }
+  }
+  rt = null; rtOpen = false;
+
+  const text = currentUserText();
+  busy = false;
+  setOnline(true, "AI System Online");
+
+  if (!text) {
+    if (partialRow) { partialRow.remove(); partialRow = null; }
+    setState("");
+    sub.textContent = "I didn't catch that — hold the mic and try again";
+    return;
+  }
+  finalizePartial(text);
+  await handleFinalText(text);
+}
+
+async function stopEverything() {
+  holding = false;
+  isRecording = false;
+  await stopRecorder();
+  if (rt) { const r = rt; rt = null; try { await r.close(false); } catch (_) {} }
+  rtOpen = false;
+  pcmQueue = new Uint8Array(0);
+  audio.pause();
+  if (partialRow) { partialRow.remove(); partialRow = null; }
+  setOnline(true, "AI System Online");
+  setState("");
+}
+
 // ---------- Buttons ----------
-mic.onclick = () => { initLipSync(); return isRecording ? stopSession() : startSession(); };
-stopBtn.onclick = () => { if (isRecording) stopSession(); else { audio.pause(); setState(""); } };
+// pointer events cover mouse + touch
+mic.addEventListener("pointerdown", (e) => { e.preventDefault(); mic.setPointerCapture?.(e.pointerId); pressStart(); });
+mic.addEventListener("pointerup", () => releaseStop());
+mic.addEventListener("pointercancel", () => releaseStop());
+mic.addEventListener("contextmenu", (e) => e.preventDefault()); // no long-press menu on mobile
+
+// Space bar = push-to-talk
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && !e.repeat && !["INPUT","TEXTAREA","SELECT"].includes(document.activeElement.tagName)) { e.preventDefault(); pressStart(); }
+});
+document.addEventListener("keyup", (e) => { if (e.code === "Space") { e.preventDefault(); releaseStop(); } });
+
+stopBtn.onclick = () => stopEverything();
 
 muteBtn.onclick = () => {
   muted = !muted;
