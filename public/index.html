@@ -386,19 +386,15 @@ function stopRecorder() {
     if (!recorder) return resolve();
     const r = recorder; recorder = null;
     try {
-      r.stopRecording(async () => {
-        try {
-          const blob = r.getBlob();
-          if (blob && rt) queueAndSend(new Uint8Array(await blob.arrayBuffer(), 44));
-        } catch (_) {}
-        resolve();
-      });
+      // Do NOT send r.getBlob() here: it is the FULL recording, not the last piece.
+      // Sending it made AssemblyAI hear (and print) the whole sentence twice.
+      r.stopRecording(() => resolve());
     } catch (_) { resolve(); }
   });
 }
 
 function currentUserText() {
-  return finishedText.join(" ").trim();
+  return finishedText.filter(Boolean).join(" ").trim();
 }
 
 async function pressStart() {
@@ -424,7 +420,9 @@ async function pressStart() {
 
     rt.on("turn", (turn) => {
       const live = turn.end_of_turn ? "" : turn.transcript;
-      if (turn.end_of_turn && turn.transcript.trim()) finishedText.push(turn.transcript.trim());
+      // AssemblyAI can send the same finished turn twice (raw, then formatted).
+      // Store by turn_order so the second one replaces the first, not adds to it.
+      if (turn.end_of_turn && turn.transcript.trim()) finishedText[turn.turn_order] = turn.transcript.trim();
       const shown = [currentUserText(), live].join(" ").trim();
       if (shown) updatePartial(shown);
     });
