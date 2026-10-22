@@ -67,6 +67,12 @@ button:disabled{opacity:.6;cursor:wait}
 .mic{width:68px;height:68px;border-radius:22px;background:linear-gradient(135deg,var(--accent),#9a78ff);box-shadow:0 14px 35px rgba(124,92,255,.3);font-size:25px;transition:.2s}
 .mic:hover{transform:translateY(-2px);filter:brightness(1.08)}.mic.active{background:linear-gradient(135deg,#ff5276,#ff7b98)}
 .small-btn{width:44px;height:44px;border-radius:15px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:#cbd2df}
+.vertical-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;margin:-4px 0 18px}
+.vertical-wrap label{font-size:14px;font-weight:700;color:#dbe0ea;letter-spacing:.3px}
+.vertical-select{min-width:280px;padding:10px 14px;border:1px solid rgba(124,92,255,.45);border-radius:14px;color:#f5f7fb;font:inherit;font-size:13px;background:rgba(18,22,34,.92);outline:none;cursor:pointer;box-shadow:0 0 24px rgba(124,92,255,.18)}
+.vertical-select:focus{border-color:var(--accent2)}
+.vertical-select.pick{animation:glow 1.6s ease-in-out infinite}
+@keyframes glow{50%{box-shadow:0 0 30px rgba(34,211,238,.45)}}
 .hint{margin-top:16px;color:#697387;font-size:11px}
 .side{display:flex;flex-direction:column;min-height:680px}
 .side-head{padding:22px 22px 17px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
@@ -124,8 +130,20 @@ audio{display:none}
       </g>
     </svg>
   </div></div>
-  <div class="state"><h1 id="stateTitle">Ready to talk</h1><p id="stateText">Hold the microphone and speak</p></div>
+  <div class="state"><h1 id="stateTitle">Ready to talk</h1><p id="stateText">Choose an industry to begin</p></div>
   <div class="wave" id="wave"></div>
+  <div class="vertical-wrap">
+    <label for="vertical">Choose your industry</label>
+    <select id="vertical" class="vertical-select pick">
+      <option value="" selected disabled>Select an industry…</option>
+      <option>Healthcare &amp; Life Sciences</option>
+      <option>Financial Services &amp; Banking</option>
+      <option>Retail &amp; E-Commerce</option>
+      <option>Education &amp; EdTech</option>
+      <option>Manufacturing &amp; Supply Chain</option>
+      <option>Travel, Hospitality &amp; Entertainment</option>
+    </select>
+  </div>
   <div class="controls">
     <button class="small-btn" id="mute" title="Mute / unmute">🔈</button>
     <button class="mic" id="mic" title="Start / stop voice conversation">🎙️</button>
@@ -156,6 +174,7 @@ const title = document.getElementById("stateTitle");
 const sub = document.getElementById("stateText");
 const messages = document.getElementById("messages");
 const voiceSelect = document.getElementById("translation-language");
+const verticalSelect = document.getElementById("vertical");
 const statusDot = document.getElementById("statusDot");
 const statusText = document.getElementById("statusText");
 const audio = document.getElementById("myAudio");
@@ -324,12 +343,20 @@ async function handleFinalText(text) {
     const response = await fetch("/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, target_lang: voiceSelect.value }),
+      body: JSON.stringify({ text, target_lang: voiceSelect.value, vertical: verticalSelect.value }),
     });
     if (!response.ok) throw new Error(`/translate failed: ${response.status}`);
-    const data = await response.json();
-    const botText = data.textF || "";
+    playBot(await response.json());
+  } catch (e) {
+    console.error("Translate/TTS error:", e);
+    addError("Sorry, I couldn't generate a reply. Check the server console.");
+    idleState();
+  }
+}
 
+// Print bot text in chat + speak it with lip sync
+function playBot(data) {
+    const botText = data.textF || "";
     let printed = false;
     const printBot = () => { if (!printed) { printed = true; addMsg(botText, false); } };
 
@@ -344,12 +371,35 @@ async function handleFinalText(text) {
       printBot();
       idleState();
     }
+}
+
+// Greeting when an industry is selected (first message of the conversation)
+async function greet() {
+  const vertical = verticalSelect.value;
+  if (!vertical) return;
+  await stopEverything();
+  // new industry = new conversation
+  partialRow = null;
+  messages.innerHTML = '<div class="empty" id="emptyNote">No messages yet</div>';
+  initLipSync();                         // select change is a user gesture -> audio allowed
+  verticalSelect.classList.remove("pick");
+  mic.disabled = false;
+  setState("thinking");
+  try {
+    const response = await fetch("/greet", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vertical, target_lang: voiceSelect.value }),
+    });
+    if (!response.ok) throw new Error(`/greet failed: ${response.status}`);
+    playBot(await response.json());
   } catch (e) {
-    console.error("Translate/TTS error:", e);
-    addError("Sorry, I couldn't generate a reply. Check the server console.");
+    console.error("Greeting error:", e);
+    addMsg(`Hello! I’m here to help across ${vertical}. What can I help you with today?`, false);
     idleState();
   }
 }
+verticalSelect.addEventListener("change", greet);
 
 // ---------- Session control (push-to-talk) ----------
 // Press  -> open AssemblyAI socket + start mic (audio is buffered while connecting)
@@ -399,6 +449,11 @@ function currentUserText() {
 
 async function pressStart() {
   if (busy || holding) return;
+  if (!verticalSelect.value) {
+    sub.textContent = "Please choose an industry first";
+    verticalSelect.focus();
+    return;
+  }
   holding = true;
   busy = true;
   initLipSync();

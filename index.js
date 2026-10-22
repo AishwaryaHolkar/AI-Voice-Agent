@@ -52,10 +52,34 @@ app.get("/token", async (req, res) => {
   }
 });
 
+const VERTICALS = [
+  "Healthcare & Life Sciences",
+  "Financial Services & Banking",
+  "Retail & E-Commerce",
+  "Education & EdTech",
+  "Manufacturing & Supply Chain",
+  "Travel, Hospitality & Entertainment",
+];
+const cleanVertical = (v) => (VERTICALS.includes(v) ? v : VERTICALS[0]);
+
+// First message: hardcoded greeting with the selected vertical, spoken via Google TTS
+app.post("/greet", async (req, res) => {
+  try {
+    const vertical = cleanVertical(req.body.vertical);
+    const textF = `Hello! I’m here to help across ${vertical}. What can I help you with today?`;
+    const data = await quickStart(textF, req.body.target_lang);
+    res.json({ textF, data });
+  } catch (e) {
+    console.error("Greet error:", e);
+    res.status(500).json({ error: "Could not create greeting" });
+  }
+});
+
 app.post("/translate", async (req, res) => {
   const { text, target_lang } = req.body;
+  const vertical = cleanVertical(req.body.vertical);
   //const translation = await translator.translateText(text, "en", target_lang);
-  const  prompt   = `You are a helpful and enthusiastic and empathetic chat bot who can answer user's question : ${text}.Always speak as if you were chatting to a friend.Please reply in only 20-30 words.`
+  const  prompt   = `You are a expert in ${vertical} and helpful and enthusiastic and empathetic chat bot who can answer user's question : ${text}.Always speak as if you were chatting to a friend.Please reply in only 20-30 words.`
           const completion = await openai.chat.completions.create({
             messages: [{ role: "user", content: prompt }],
             model: "gpt-3.5-turbo",
