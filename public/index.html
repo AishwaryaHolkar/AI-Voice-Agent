@@ -130,15 +130,14 @@ audio{display:none}
       </g>
     </svg>
   </div></div>
-  <div class="state"><h1 id="stateTitle">Ready to talk</h1><p id="stateText">Choose an industry to begin</p></div>
+  <div class="state"><h1 id="stateTitle">Ready to talk</h1><p id="stateText">Hold the microphone and speak</p></div>
   <div class="wave" id="wave"></div>
   <div class="vertical-wrap">
     <label for="vertical">Choose your industry</label>
-    <select id="vertical" class="vertical-select pick">
-      <option value="" selected disabled>Select an industry…</option>
+    <select id="vertical" class="vertical-select">
       <option>Healthcare &amp; Life Sciences</option>
       <option>Financial Services &amp; Banking</option>
-      <option>Retail &amp; E-Commerce</option>
+      <option selected>Retail &amp; E-Commerce</option>
       <option>Education &amp; EdTech</option>
       <option>Manufacturing &amp; Supply Chain</option>
       <option>Travel, Hospitality &amp; Entertainment</option>
@@ -355,6 +354,19 @@ async function handleFinalText(text) {
 }
 
 // Print bot text in chat + speak it with lip sync
+let pendingAudio = false;
+
+function playPending(e) {
+  if (!pendingAudio) return;
+  pendingAudio = false;
+  if (e && (mic.contains(e.target) || e.target === verticalSelect || e.code === "Space")) return; // user wants to talk / change industry
+  initLipSync();
+  audio.onplay = () => setState("speaking");   // text is already in chat
+  audio.play().catch(err => console.warn("Audio still blocked:", err));
+}
+document.addEventListener("pointerdown", playPending, true);
+document.addEventListener("keydown", playPending, true);
+
 function playBot(data) {
     const botText = data.textF || "";
     let printed = false;
@@ -365,7 +377,13 @@ function playBot(data) {
       audio.load();
       audio.onplay = () => { printBot(); setState("speaking"); };
       audio.onended = () => idleState();
-      audio.play().catch(e => { console.warn("Audio play blocked:", e); printBot(); idleState(); });
+      audio.play().catch(e => {
+        console.warn("Audio play blocked:", e);
+        printBot();
+        idleState();
+        // Browser blocked autoplay (page load, no click yet): play on first click/key
+        if (e.name === "NotAllowedError") pendingAudio = true;
+      });
     } else {
       if (!data?.data?.audioContent) console.warn("No audio from Google TTS — check server logs / GOOGLE_API_KEY.");
       printBot();
@@ -374,14 +392,15 @@ function playBot(data) {
 }
 
 // Greeting when an industry is selected (first message of the conversation)
-async function greet() {
+async function greet(fromLoad = false) {
   const vertical = verticalSelect.value;
   if (!vertical) return;
   await stopEverything();
   // new industry = new conversation
   partialRow = null;
   messages.innerHTML = '<div class="empty" id="emptyNote">No messages yet</div>';
-  initLipSync();                         // select change is a user gesture -> audio allowed
+  pendingAudio = false;
+  if (fromLoad !== true) initLipSync();  // only on a user gesture (audio context needs one)
   verticalSelect.classList.remove("pick");
   mic.disabled = false;
   setState("thinking");
@@ -399,7 +418,9 @@ async function greet() {
     idleState();
   }
 }
-verticalSelect.addEventListener("change", greet);
+verticalSelect.addEventListener("change", () => greet(false));
+// Default industry greeting as soon as the page loads
+window.addEventListener("load", () => greet(true));
 
 // ---------- Session control (push-to-talk) ----------
 // Press  -> open AssemblyAI socket + start mic (audio is buffered while connecting)
