@@ -82,7 +82,7 @@ app.post("/translate", async (req, res) => {
   const  prompt   = `You are a expert in ${vertical} and helpful and enthusiastic and empathetic chat bot who can answer user's question : ${text}.Always speak as if you were chatting to a friend.Please reply in only 20-30 words.`
           const completion = await openai.chat.completions.create({
             messages: [{ role: "user", content: prompt }],
-            model: "gpt-3.5-turbo",
+            model: "gpt-4o-mini",
         });
   //console.log(completion.choices[0].message.content, target_lang);
   const data = await quickStart(completion.choices[0].message.content, target_lang);
