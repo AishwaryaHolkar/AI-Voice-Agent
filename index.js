@@ -84,7 +84,7 @@ app.post("/translate", async (req, res) => {
             messages: [{ role: "user", content: prompt }],
             model: "gpt-4o-mini",
         });
-  //console.log(completion.choices[0].message.content, target_lang);
+  /*console.log(completion.choices[0].message.content, target_lang);*/
   const data = await quickStart(completion.choices[0].message.content, target_lang);
   var textF = completion.choices[0].message.content;
 
